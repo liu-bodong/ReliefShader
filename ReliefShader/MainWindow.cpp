@@ -182,7 +182,6 @@ bool MainWindow::SaveSettings()
 void MainWindow::Init()
 {
     m_pRenderer = Renderer::GetInstance();
-    //ui.previewFrame->setUpdatesEnabled(false);
 
     QRegExp regExp("0|[1-9]\\d{0,4}");
     ui.hLineEdit->setValidator(new QRegExpValidator(regExp, this));
@@ -196,9 +195,9 @@ void MainWindow::Init()
     // temporary
     auto defaultColorScheme = new ColorScheme();
     defaultColorScheme->AddColor(162, 215, 90, 0.0);
-    defaultColorScheme->AddColor(139, 134, 78, 0.35);
-    defaultColorScheme->AddColor(205, 133, 63, 0.5);
-    defaultColorScheme->AddColor(165, 42, 42, 0.7);
+    defaultColorScheme->AddColor(139, 134, 78, 0.3);
+    defaultColorScheme->AddColor(205, 133, 0, 0.5);
+    defaultColorScheme->AddColor(165, 42, 42, 0.75);
     defaultColorScheme->AddColor(132, 112, 255, 1.0);
 
 

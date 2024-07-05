@@ -90,7 +90,6 @@ void Renderer::RecordCharacteristic(Vertex* v1, Vertex* v2, int contour)
     {
         m_charVertices.push_back(v1);
         m_charVertices.push_back(v2);
-        m_charLines.insert(Line(int(m_charVertices.size() - 2), int(m_charVertices.size() - 1)));
         m_contours[contour].insert(Line(int(m_charVertices.size() - 2), int(m_charVertices.size() - 1)));
     }
 }
@@ -145,7 +144,6 @@ Vertex* Renderer::LinearInterpolate(Vertex* v1, Vertex* v2, double z)
 void Renderer::Clear()
 {
     m_charVertices.clear();
-    m_charLines.clear();
     m_charSides.clear();
     m_contours.clear();
 }

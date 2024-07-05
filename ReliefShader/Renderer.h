@@ -54,7 +54,6 @@ public:
 
 
     std::vector<double> GetStepValues() const { return m_contourValues; };
-    std::set<Line> GetCharLines() const { return m_charLines; };
     std::vector<Vertex*> GetCharVertices() const { return m_charVertices; };
     std::vector< std::set<Line> > GetContourLines() const { return m_contours; };
 
@@ -97,7 +96,6 @@ private:
     // The following share the same index with m_charVertices
     // 以下的索引指向m_charVertices
     std::vector<Vertex*> m_charVertices;   // vertices on the intersection of contours and faces' lines 特征顶点：在等高线和面的交线上的顶点
-    std::set<Line> m_charLines;            // a set of characteristic lines of faces, each line is a pair of two characteristic vertices' index in m_charVertices
     std::vector< std::set<Line> > m_contours;// a list of contours, each contour is a set of characteristic lines
 
     // relief properties

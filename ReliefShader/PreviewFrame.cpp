@@ -40,8 +40,6 @@ void PreviewFrame::paintEvent(QPaintEvent* event)
 
     image.fill(Qt::white);
 
-
-    auto charLines = m_pRenderer->GetCharLines();
     auto charVertices = m_pRenderer->GetCharVertices();
     auto contourLines = m_pRenderer->GetContourLines();
 
