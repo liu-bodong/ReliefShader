@@ -1,36 +1,22 @@
 #pragma once
 
+#include <memory>
 
-struct Line
+struct Vector;
+
+// DirectedLine class stores two vectors [a] and [b] that represent a line segment [b - a].
+// The direction of the line is from [a] to [b], and it is required that the right
+// hand side normal of the line must point towards the higher contour.
+struct DirectedLine
 {
-    int first;
-    int second;
-    int count = 0;
-    Line(int f, int s) : first(f), second(s) {}
-    Line() = delete;
-    bool operator==(const Line& l) const
-    {
-        return (first == l.first && second == l.second) || (first == l.second && second == l.first);
-    }
-    bool operator!=(const Line& l) const
-    {
-        return (first != l.first || second != l.second) && (first != l.second || second != l.first);
-    }
-    bool operator<(const Line& l) const
-    {
-        return first < l.first || (first == l.first && second < l.second);
-    }
-    bool operator>(const Line& l) const
-    {
-        return first > l.first || (first == l.first && second > l.second);
-    }
-    bool operator<=(const Line& l) const
-    {
-        return first <= l.first || (first == l.first && second <= l.second);
-    }
-    bool operator>=(const Line& l) const
-    {
-        return first >= l.first || (first == l.first && second >= l.second);
-    }
+    DirectedLine(Vector* a, Vector* b) : a(a), b(b) {};
+    DirectedLine() = delete;
+
+    Vector* a;
+    Vector* b;
+
+    // implement comparison operators
+    bool operator==(const DirectedLine& other) const { return a == other.a && b == other.b; }
+    bool operator!=(const DirectedLine& other) const { return !(*this == other); }
 };
 

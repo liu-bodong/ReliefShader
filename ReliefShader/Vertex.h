@@ -1,9 +1,7 @@
 #pragma once
 
-#include <QObject>
-#include <QColor>
 
-class Vertex : public QObject
+class Vertex
 {
 
 public:
@@ -19,9 +17,18 @@ public:
     void SetY(double y) { m_y = y; };
     void SetZ(double z) { m_z = z; };
 
+    double Dot(const Vertex& v) const { return m_x * v.m_x + m_y * v.m_y + m_z * v.m_z; };
+
+    Vertex* Cross(const Vertex& v) const
+    {
+        return new Vertex(m_y * v.m_z - m_z * v.m_y,
+            m_z * v.m_x - m_x * v.m_z,
+            m_x * v.m_y - m_y * v.m_x);
+    }
+
 private:
     double m_x;
     double m_y;
     double m_z;
-    QColor m_color = nullptr;
+
 };

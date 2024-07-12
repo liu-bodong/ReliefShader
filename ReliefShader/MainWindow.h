@@ -3,8 +3,6 @@
 #include <QtWidgets/QWidget>
 #include "ui_MainWindow.h"
 
-class Renderer;
-
 class MainWindow : public QWidget
 {
     Q_OBJECT
@@ -18,8 +16,6 @@ signals:
 
 public slots:
     void on_loadFileButton_clicked();
-    void on_saveSettingsButton_clicked();
-    void on_loadSettingsButton_clicked();
 
     void on_renderButton_clicked();
 
@@ -36,10 +32,6 @@ private:
     Ui::MainWindow ui;
 
     bool LoadFile();
-    bool LoadSettings();
-    bool SaveSettings();
 
     void Init();
-
-    Renderer* m_pRenderer;
 };

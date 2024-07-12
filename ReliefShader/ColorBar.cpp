@@ -17,8 +17,8 @@ void ColorBar::paintEvent(QPaintEvent* event)
     QRect rect = this->frameRect();
     QLinearGradient gradient(rect.topLeft(), rect.bottomRight());
 
-    auto colors = m_colorScheme->GetColors();
-    auto pos = m_colorScheme->GetPositions();
+    auto colors = m_pColorScheme->GetColors();
+    auto pos = m_pColorScheme->GetPositions();
 
     for (auto i = 0; i < colors.size(); ++i)
     {

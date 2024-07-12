@@ -1,109 +1,276 @@
+#include <QFileDialog>
+#include <qfile.h>
+#include <set>
+#include <vector>
+#include <qdebug.h>
+#include <utility>
+#include <memory>
+#include <stdexcept>
+
 #include "Renderer.h"
 #include "Vertex.h"
 #include "Face.h"
 #include "Line.h"
-
-#include <QFileDialog>
-#include <qfile.h>
-#include <qtextstream.h>
-#include <cmath>
-#include <set>
-
+#include "ColorScheme.h"
+#include "Vector.h"
+#include "Data.h"
+#include "Settings.h"
 
 Renderer* Renderer::g_pInstance = new (std::nothrow) Renderer();
 
 // #################### public ####################
-
 
 /// <summary>
 /// To be implemented
 /// </summary>
 void Renderer::Render()
 {
+    // Init
+    if (!Settings::GetInstance()) { return; }
+    if (!Data::GetInstance()) { return; }
+
+    auto pData = Data::GetInstance();
+    auto pSettings = Settings::GetInstance();
+    int numContours = pSettings->GetNumContours();
     Clear();
 
-
-    // create empty contours corresponding to the number of contours
-    for (auto i = 0; i < m_numContours; ++i)
+    // create empty contours
+    for (int i = 0; i < numContours; ++i)
     {
-        auto set = std::set<Line>();
+        auto set = std::set<DirectedLine*>();
         m_contours.push_back(set);
     }
 
-    for (auto face : m_faces)
+    // process each face
+    for (unsigned int i = 0; i < pData->GetFacesCount(); i++)
     {
-        CalculateIntersectionsOnFace(face);
+        auto face = pData->GetFace(i);
+        ProcessFace(face);
     }
 
-    lock = false;
-
+    UnLock();
 }
 
-void Renderer::CalculateIntersectionsOnFace(Face* face)
+// 目前这个函数的实现是有问题的
+// 1. 没有考虑到边界情况，边界外的点也会被上色
+// 2. 边界内的点上色异常
+ColorScheme::RGB Renderer::GetColorAt(double x, double y) const
 {
-    // get the vertices
-    auto iV1 = face->GetAt(0);
-    auto iV2 = face->GetAt(1);
-    auto iV3 = face->GetAt(2);
+    auto contour1 = FindNearestContourLine(x, y);
+    auto contourLineSeg = std::get<1>(contour1);
+    int matchedContourIndex = std::get<0>(contour1);
+    auto normalVector = std::get<2>(contour1);
+    auto distanceToMatchedContour = normalVector.Length();
 
-    std::vector<Line> sides; // sides on the intersection of contours and faces
-    sides.push_back(Line(iV1, iV2));
-    sides.push_back(Line(iV2, iV3));
-    sides.push_back(Line(iV3, iV1));
+    auto lineVector = (contourLineSeg->b)->Subtract(*contourLineSeg->a);
 
+    auto contourLineSegDirection = Vector(lineVector);
 
-    for (auto i = 0; i < m_numContours; ++i)
+    int secondContourIndex;
+
+    if (normalVector.Cross(contourLineSegDirection) > 0) // the normal vector is pointing towards the higher contour
     {
-        auto contourValue = m_contourValues[i];
-        std::vector<Vertex*> intersections;
+        secondContourIndex = matchedContourIndex + 1;
+    }
+    else // the normal vector is pointing towards the lower contour
+    {
+        secondContourIndex = matchedContourIndex - 1;
+    }
 
-        // process each side of three sides of the face
-        for (Line side : sides)
+    try
+    {
+        auto contour2 = FindNearestLine(x, y, secondContourIndex);
+        auto normalVector2 = contour2.second;
+        auto distanceToSecondContour = normalVector2.Length();
+
+        auto ratio = distanceToMatchedContour / (distanceToMatchedContour + distanceToSecondContour);
+
+        auto color1 = m_contourColors[matchedContourIndex];
+        auto color2 = m_contourColors[secondContourIndex];
+
+        return InterpolateColor(color1, color2, ratio);
+    }
+    catch (const std::out_of_range&)
+    {
+        return m_contourColors[matchedContourIndex];
+    }
+}
+
+
+
+// Find the nearest contour line to the given point (x, y). Returns the contour index, the contour line, and the vector from the line pointing to the point.
+// 找到距离给定点(x, y)最近的等高线。返回等高线的索引、等高线和指向点的向量。
+std::tuple<int, DirectedLine*, Vector> Renderer::FindNearestContourLine(double x, double y) const
+{
+    double distance = std::numeric_limits<double>::max(); // set distance to max double
+    double contourIndex = -1; // initialize contourIndex to -1
+    Vector normalVector;
+    DirectedLine* contourLine = nullptr; // initialize contourLine to nullptr
+    for (int k = 0; k < m_contours.size(); k++) // iterate over each contour
+    {
+        auto pair = FindNearestLine(x, y, k);
+        auto tempNormalVector = pair.second;
+        contourLine = pair.first;
+        if (normalVector.Length() < distance)
         {
-            if (side.count == 2) { continue; } // skip if the side has been processed
+            distance = normalVector.Length();
+            contourIndex = k;
+            normalVector = tempNormalVector;
+        }
+    }
+    return std::make_tuple(contourIndex, contourLine, normalVector);
+}
 
-            auto p = LinearInterpolate(m_vertices[side.first], m_vertices[side.second], contourValue);
+// Find the nearest line to the given point (x, y) in the contour with the given index. Returns the line and the vector from the line pointing to the point.
+// 在给定索引的等高线中找到距离给定点(x, y)最近的线。返回线和指向点的向量。
+std::pair<DirectedLine*, Vector> Renderer::FindNearestLine(double x, double y, int contourIndex) const
+{
+    if (contourIndex < 0 || contourIndex >= m_contours.size()) // contourIndex out of range
+    {
+        throw std::out_of_range("Contour index out of range.");
+    }
 
-            if (p)
+    double distance = std::numeric_limits<double>::max(); // set distance to max double
+    Vector normalVector;
+    DirectedLine* contourLine = nullptr; // Initialize contourLine to nullptr
+    for (auto line : m_contours.at(contourIndex)) // iterate over each line in the contour
+    {
+        auto p = Vector(x, y);
+        auto tempVector = LineToPointVector(p, *(line->a), *(line->b));
+        if (tempVector.Length() < distance)
+        {
+            distance = normalVector.Length();
+            contourLine = line;
+            normalVector = tempVector;
+        }
+    }
+    return std::make_pair(contourLine, normalVector);
+}
+
+// Returns the vector from a point to a line segment. The length of the vector is the distance from the point to the line segment.
+// 返回从点到线段的向量。向量的长度是点到线段的距离。
+Vector Renderer::LineToPointVector(const Vector& p, const Vector& v1, const Vector& v2) const
+{
+    // creates a vector from vector v1 to vector v2
+    auto a = std::make_shared<Vector>(v1, v2);
+    auto b = std::make_shared<Vector>(v1, p);
+    auto a_dot_b = a->Dot(*b);
+    if (a_dot_b < 0) // projection is outside the line segment, closer to v1
+    {
+        return Vector(v1, p);
+    }
+    else if (a_dot_b > a->Length()) // projection is outside the line segment, closer to v2
+    {
+        return Vector(v2, p);
+    }
+    else // projection is inside the line segment
+    {
+        auto b_projectionOn_a = std::make_shared<Vector>(a->Multiply(a_dot_b / a->Length()));
+        auto normalVector = std::make_shared<Vector>(b->Subtract(*b_projectionOn_a));
+        return *normalVector;
+    }
+}
+
+void Renderer::ProcessFace(const Face* face)
+{
+    auto pSettings = Settings::GetInstance();
+    auto pData = Data::GetInstance();
+
+    auto vertices = pData->GetVertices();
+    auto numContours = pSettings->GetNumContours();
+
+    auto v1Ind = face->Get(0);
+    auto v2Ind = face->Get(1);
+    auto v3Ind = face->Get(2);
+
+    auto z1 = pData->GetVertex(v1Ind)->GetZ();
+    auto z2 = pData->GetVertex(v2Ind)->GetZ();
+    auto z3 = pData->GetVertex(v3Ind)->GetZ();
+
+    auto zMin = std::min(z1, std::min(z2, z3));
+    auto zMax = std::max(z1, std::max(z2, z3));
+
+    auto side12 = Side(v1Ind, v2Ind);
+    auto side23 = Side(v2Ind, v3Ind);
+    auto side31 = Side(v3Ind, v1Ind);
+    std::vector<Side> sides = { side12, side23, side31 };
+
+    // find the contour values that fall within the range
+    std::vector<int> hitContourVals;
+    for (auto i = 0; i < numContours; ++i)
+    {
+        auto contourValue = m_contourVals[i];
+        if (zMin <= contourValue && contourValue <= zMax)
+        {
+            hitContourVals.push_back(i);
+        }
+    }
+
+    // for each contour value in the range
+    for (auto contourIndex : hitContourVals)
+    {
+        auto contourValue = m_contourVals[contourIndex];
+        std::vector<Vector*> intersections;
+        std::vector<int> intersectSides;
+
+        for (auto i = 0; i < 3; ++i) // process each side by order, 0-1, 1-2, 2-0
+        {
+            auto v1 = vertices->at(sides[i].first);
+            auto v2 = vertices->at(sides[i].second);
+            auto intersection = LinearInterpolate(v1, v2, contourValue);
+            if (intersection)
             {
-                intersections.push_back(p);
-                m_charSides.insert(side);
-                side.count = side.count + 1;
+                intersections.push_back(intersection);
+                intersectSides.push_back(i);
             }
         }
 
-        if (intersections.size() == 2)
+        RecordLine(intersections, intersectSides, z1, z2, z3, contourIndex);
+    }
+}
+
+// Records a line between two vertices and stores the contour index.
+void Renderer::RecordLine(std::vector<Vector*> intersections, std::vector<int> intersectSides, double z1, double z2, double z3, int contourIndex)
+{
+    if (intersections.size() == 2)
+    {
+        auto contourValue = m_contourVals[contourIndex];
+        auto sidePair = std::make_pair(intersectSides[0], intersectSides[1]);
+        DirectedLine* line;
+        if (sidePair == std::make_pair(0, 1))
         {
-            RecordCharacteristic(intersections.at(0), intersections.at(1), i);
+            if (z2 > contourValue) { line = new DirectedLine(intersections[0], intersections[1]); }
+            else { line = new DirectedLine(intersections[1], intersections[0]); }
         }
+        else if (sidePair == std::make_pair(1, 2))
+        {
+            if (z3 > contourValue) { line = new DirectedLine(intersections[0], intersections[1]); }
+            else { line = new DirectedLine(intersections[1], intersections[0]); }
+        }
+        else if (sidePair == std::make_pair(0, 2))
+        {
+            if (z3 > contourValue) { line = new DirectedLine(intersections[0], intersections[1]); }
+            else { line = new DirectedLine(intersections[1], intersections[0]); }
+        }
+        else
+        {
+            // should not happen
+            return;
+        }
+        m_contours[contourIndex].insert(line);
     }
 }
 
 /// <summary>
-/// Records the characteristic vertices in the set "intersections".
-/// </summary>
-/// <param name="intersections"></param>
-void Renderer::RecordCharacteristic(Vertex* v1, Vertex* v2, int contour)
-{
-    // record the characteristic vertices
-    if (v1 && v2)
-    {
-        m_charVertices.push_back(v1);
-        m_charVertices.push_back(v2);
-        m_contours[contour].insert(Line(int(m_charVertices.size() - 2), int(m_charVertices.size() - 1)));
-    }
-}
-/// <summary>
-/// Calculates the intersection point between two vertices and a given z value.
+/// Calculates for an intersection point between two vertices and a given z value.
 /// </summary>
 /// <param name="v1"></param>
 /// <param name="v2"></param>
 /// <param name="z"></param>
 /// <returns>
-/// A new Vertex object representing the intersection point.
-/// Or nullptr if the intersection point does not exist.
+/// A smart pointer to a Vector object that represents the intersection point.
 /// </returns>
-Vertex* Renderer::LinearInterpolate(Vertex* v1, Vertex* v2, double z)
+Vector* Renderer::LinearInterpolate(Vertex* v1, Vertex* v2, double z)
 {
     // calculate the intersection point
     auto x1 = v1->GetX();
@@ -114,251 +281,97 @@ Vertex* Renderer::LinearInterpolate(Vertex* v1, Vertex* v2, double z)
     auto y2 = v2->GetY();
     auto z2 = v2->GetZ();
 
+    if (z1 == z) {
+        v1->SetZ(z1 - 1E-10);
+    }
+    else if (z2 == z) {
+        v2->SetZ(z2 - 1E-10);
+    }
+
     if ((z1 - z) * (z2 - z) < 0) // means the intersection point exists
     {
         // calculate the intersection point
-        auto x = (x1 + (z - v1->GetZ()) * (x2 - x1) / (v2->GetZ() - v1->GetZ()));
-        auto y = (y1 + (z - v1->GetZ()) * (y2 - y1) / (v2->GetZ() - v1->GetZ()));
-        return new Vertex(x, y, z);
-    }
-    else if (z1 == z)
-    {
-        v1->SetZ(z1 - 1E-15);
-        auto x = (x1 + (z - v1->GetZ()) * (x2 - x1) / (v2->GetZ() - v1->GetZ()));
-        auto y = (y1 + (z - v1->GetZ()) * (y2 - y1) / (v2->GetZ() - v1->GetZ()));
-        return new Vertex(x, y, z);
-    }
-    else if (z2 == z)
-    {
-        v2->SetZ(z2 - 1E-15);
-        auto x = (x1 + (z - v1->GetZ()) * (x2 - x1) / (v2->GetZ() - v1->GetZ()));
-        auto y = (y1 + (z - v1->GetZ()) * (y2 - y1) / (v2->GetZ() - v1->GetZ()));
-        return new Vertex(x, y, z);
+        auto x = (x1 + (z - z1) * (x2 - x1) / (z2 - z1));
+        auto y = (y1 + (z - z1) * (y2 - y1) / (z2 - z1));
+        return new Vector(x, y);
     }
     return nullptr;
 }
 
-/// <summary>
-/// Clears the Renderer.
-/// </summary>
-void Renderer::Clear()
+// Interpolates the color between two colors according to the given ratio.
+// Formula: color = color1 + (color2 - color1) * ratio
+ColorScheme::RGB Renderer::InterpolateColor(ColorScheme::RGB color1, ColorScheme::RGB color2, double ratio) const
 {
-    m_charVertices.clear();
-    m_charSides.clear();
-    m_contours.clear();
+    auto r = static_cast<short>(std::get<0>(color1) + (std::get<0>(color2) - std::get<0>(color1)) * ratio);
+    auto g = static_cast<short>(std::get<1>(color1) + (std::get<1>(color2) - std::get<1>(color1)) * ratio);
+    auto b = static_cast<short>(std::get<2>(color1) + (std::get<2>(color2) - std::get<2>(color1)) * ratio);
+
+    return ColorScheme::RGB(r, g, b);
 }
 
-/// <summary>
-/// Loads a file with the given fileName and populates the Renderer with vertices and faces.
-/// </summary>
-/// <param name="fileName">The name of the file to load.</param>
-/// <returns>
-/// bool: true if loaded successfully
-/// </returns>
-bool Renderer::LoadFile(const QString& fileName)
-{
-    // initialize max and min X, Y, Z values
-    double maxX = 0;
-    double minX = DBL_MAX;
-    double maxY = 0;
-    double minY = DBL_MAX;
-    double maxZ = 0;
-    double minZ = DBL_MAX;
-
-    QFile file(fileName);
-    file.open(QIODevice::ReadOnly);
-    QString line;
-    int numVertices = 0;
-    int numFaces = 0;
-    while (!file.atEnd())
-    {
-        line = file.readLine();
-        QStringList list = line.split(' ');
-        if (list[0] == "v")
-        {
-            double x = list[1].toDouble();
-            double y = list[2].toDouble();
-            double z = list[3].toDouble();
-            auto vertex = new Vertex(x, y, z);
-            AddVertex(vertex);
-
-            maxX = std::max(maxX, x);// get max and min X, Y, Z values when loading files
-            minX = std::min(minX, x);
-            maxY = std::max(maxY, y);
-            minY = std::min(minY, y);
-            maxZ = std::max(maxZ, z);
-            minZ = std::min(minZ, z);
-        }
-        else if (list[0] == "f")
-        {
-            int v1 = ((list[1].split('/'))[0]).toInt();
-            int v2 = ((list[2].split('/'))[0]).toInt();
-            int v3 = ((list[3].split('/'))[0]).toInt();
-            auto face = new Face(v1 - 1, v2 - 1, v3 - 1);
-            AddFace(face);
-        }
-        else if (list[0] == "#")
-        {
-            if (list[2].trimmed() == "vertices")
-            {
-                numVertices = list[1].toInt();
-            }
-            else if (list[2].trimmed() == "faces")
-            {
-                numFaces = list[1].toInt();
-            }
-        }
-    }
-    file.close();
-
-    if (numVertices != m_vertices.size() || numFaces != m_faces.size())
-    {
-        m_vertices.clear(); // clean up if the number of vertices or faces is not correct
-        m_faces.clear();
-        return false;
-    }
-
-    // initialize the Renderer
-    m_maxZ = maxZ;
-    m_minZ = minZ;
-    m_maxX = maxX;
-    m_minX = minX;
-    m_maxY = maxY;
-    m_minY = minY;
-    m_numVertices = numVertices;
-    m_numFaces = numFaces;
-    m_originalWidth = m_maxY - m_minY; // calculate original size
-    m_valueRange = m_maxZ - m_minZ;
-    m_originalHeight = m_maxX - m_minX;
-    m_aspectRatio = m_originalWidth / m_originalHeight;
-    m_valueRange = m_maxZ - m_minZ;
-    return true;
-}
-
-/// <summary>
-/// Saves the settings of the renderer to a file of name "fileName".
-/// </summary>
-/// <param name="fileName"></param>
-/// <returns>bool: true if saved successfully</returns>
-bool Renderer::SaveSettings(const QString& fileName) const
-{
-    QFile file(fileName);
-    file.open(QIODevice::WriteOnly);
-    QTextStream out(&file);
-    out << "MapResolution " << m_resolution << "\n";
-    out << "Interval " << m_interval << "\n";
-    out << "NumContours " << m_numContours << "\n";
-    out << "UseGradient " << m_useGradient << "\n";
-    file.close();
-    return true;
-}
-
-/// <summary>
-/// Loads the settings of the renderer from a file of name "fileName".
-/// </summary>
-/// <param name="fileName"></param>
-/// <returns>bool: true if loaded successfully</returns>
-bool Renderer::LoadSettings(const QString& fileName)
-{
-    QFile file(fileName);
-    file.open(QIODevice::ReadOnly);
-    QString line;
-    while (!file.atEnd())
-    {
-        line = file.readLine();
-        QString word = FirstWord(line);
-        if (word == "MapResolution")
-        {
-            m_resolution = line.split(' ')[1].toDouble();
-        }
-        else if (word == "Interval")
-        {
-            m_interval = line.split(' ')[1].toDouble();
-        }
-        else if (word == "NumContours")
-        {
-            m_numContours = line.split(' ')[1].toInt();
-        }
-        else if (word == "UseGradient")
-        {
-            m_useGradient = line.split(' ')[1].toInt();
-        }
-    }
-    file.close();
-    return true;
-}
-
-// Synchronize the rendered height with the rendered width.
-void Renderer::SyncHeight()
-{
-    m_renderedHeight = static_cast<int>(m_renderedWidth / m_aspectRatio);
-}
-
-// Synchronize the rendered width with the rendered height.
-void Renderer::SyncWidthUsingHeight()
-{
-    m_renderedWidth = static_cast<int>(m_renderedHeight * m_aspectRatio);
-}
-
-// Synchronize the rendered width with the resolution.
-void Renderer::SyncWidthUsingResolution()
-{
-    m_renderedWidth = static_cast<int>(m_originalWidth / m_resolution);
-}
-
-// Synchronize the resolution with the rendered width.
-void Renderer::SyncResolution()
-{
-    m_resolution = m_originalWidth / m_renderedWidth;
-}
-
-// Synchronize the interval with the number of contours.
-void Renderer::SyncInterval()
-{
-    if (m_numContours != 0)
-    {
-        m_interval = m_valueRange / m_numContours;
-    }
-}
-
-// Synchronize the number of contours with the interval.
-void Renderer::SyncNumContours()
-{
-    if (m_interval != 0)
-    {
-        // round up to the nearest integer
-        m_numContours = static_cast<int>(ceil(m_valueRange / m_interval));
-    }
-}
-
+// Synchronizes the contours of the image.
 void Renderer::SyncContours()
 {
-    if (m_interval != 0 && m_numContours != 0)
+    auto pSettings = Settings::GetInstance();
+    if (pSettings->GetInterval() != 0 && pSettings->GetNumContours() != 0)
     {
-        m_contourValues.clear();
-        for (int i = 0; i < m_numContours; ++i)
+        m_contourVals.clear();
+        for (int i = 0; i < pSettings->GetNumContours(); ++i)
         {
-            m_contourValues.push_back(m_minZ + (i * m_interval));
+            m_contourVals.push_back(Data::GetInstance()->GetMinValue() + (i * pSettings->GetInterval()));
         }
+        GenerateContourColors();
     }
 }
+
 
 // #################### private ####################
 
-/// <summary>
-/// Returns the first word in a given side.
-/// </summary>
-/// <param name="side"></param>
-/// <returns>QString: the first word in the "side"</returns>
-QString Renderer::FirstWord(const QString& line) const
+// Clears the Renderer.
+void Renderer::Clear()
 {
-    QString word;
-    for (auto c : line)
-    {
-        if (c == ' ')
-            break;
-        word += c;
-    }
-    return word;
+    m_contours.clear();
 }
 
+// Generates the colors for the contour lines.
+void Renderer::GenerateContourColors()
+{
+    m_contourColors.clear();
+
+    auto pSettings = Settings::GetInstance();
+
+    auto numContours = pSettings->GetNumContours();
+    auto pColorScheme = pSettings->GetColorScheme();
+
+    auto colorPositions = pColorScheme->GetPositions();
+    auto colors = pColorScheme->GetColors();
+    auto contourRatio = 1.0 / (numContours - 1);
+
+    for (auto i = 0; i < numContours; i++)
+    {
+        auto ratio = (i * contourRatio < 1) ? i * contourRatio : 1;
+        auto colorIndex = 0;
+        for (int j = 0; j < pColorScheme->GetNumColors(); j++)
+        {
+            if (ratio <= colorPositions.at(j))
+            {
+                colorIndex = j;
+                break;
+            }
+        }
+        if (colorIndex == 0)
+        {
+            colorIndex = 1;
+        }
+
+        auto color1 = colors.at(colorIndex - 1);
+        auto color2 = colors.at(colorIndex);
+        auto pos1 = colorPositions.at(colorIndex - 1);
+        auto pos2 = colorPositions.at(colorIndex);
+        auto relativeRatio = (ratio - pos1) / (pos2 - pos1);
+
+        auto color = InterpolateColor(color1, color2, relativeRatio);
+
+        m_contourColors.push_back(color);
+    }
+}

@@ -12,10 +12,10 @@ public:
     ColorBar(QWidget* parent);
     ~ColorBar();
 
-    void SetColorScheme(ColorScheme* cs) { m_colorScheme = cs; };
+    void SetColorScheme(ColorScheme* cs) { m_pColorScheme = cs; };
 
 private:
     void paintEvent(QPaintEvent* event) override;
-    ColorScheme* m_colorScheme;
+    ColorScheme* m_pColorScheme;
 
 };

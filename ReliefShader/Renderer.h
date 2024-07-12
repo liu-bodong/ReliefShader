@@ -5,25 +5,30 @@
 #include <float.h>
 #include <set>
 #include <vector>
+#include <list>
 #include <utility>
 #include "Line.h"
+#include "ColorScheme.h"
+#include <memory>
 
 class Vertex;
 class Face;
+struct Vector;
+struct DirectedLine;
 
-class ColorScheme;
 
-
-// RendererClass
-// Summary:
-// 
-// Key Terms:
+// Renderer
+// 一个单例类，用于渲染图像
+// 该类的实例是一个单例，可以通过GetInstance()函数获取
 // 
 class Renderer
 {
 public:
+    // Side is a pair of two vertex indices
+    using Side = std::pair<int, int>;
 
-    static Renderer* GetInstance()
+    // Returns the instance of the Renderer class
+    static inline Renderer* GetInstance()
     {
         return g_pInstance;
     }
@@ -32,42 +37,19 @@ public:
     void Lock() { lock = true; }
     void UnLock() { lock = false; }
 
-    void SetRenderedHeight(int h) { m_renderedHeight = h; };
-    void SetRenderedWidth(int w) { m_renderedWidth = w; };
-    void SetResolution(double r) { m_resolution = r; };
-    void SetInterval(double i) { m_interval = i; };
-    void SetNumContours(int n) { m_numContours = n; };
-    void SetUseGradient(bool b) { m_useGradient = b; };
-    void SetColorScheme(ColorScheme* c) { m_colorScheme = c; };
+    ColorScheme::RGB GetColorAt(double x, double y) const;
 
-    int GetRenderedHeight() const { return m_renderedHeight; };
-    int GetRenderedWidth() const { return m_renderedWidth; };
-    double GetOriginalWidth() const { return m_originalWidth; };
-    double GetOriginalHeight() const { return m_originalHeight; };
-    double GetResolution() const { return m_resolution; };
-    double GetInterval() const { return m_interval; };
-    int GetNumContours() const { return m_numContours; };
-    bool GetUseGradient() const { return m_useGradient; };
-    double GetXOffset() const { return m_minX; };
-    double GetYOffset() const { return m_minY; };
-    ColorScheme* GetColorScheme() const { return m_colorScheme; };
+    ColorScheme::RGB InterpolateColor(ColorScheme::RGB color1, ColorScheme::RGB color2, double ratio) const;
 
+    std::vector<ColorScheme::RGB> GetContourColors() const { return m_contourColors; };
 
-    std::vector<double> GetStepValues() const { return m_contourValues; };
-    std::vector<Vertex*> GetCharVertices() const { return m_charVertices; };
-    std::vector< std::set<Line> > GetContourLines() const { return m_contours; };
+    std::vector<double> GetStepValues() const { return m_contourVals; };
+    std::vector< std::set<DirectedLine*> > GetContourLines() const { return m_contours; };
 
-
-    void SyncHeight();
-    void SyncWidthUsingHeight();
-    void SyncWidthUsingResolution();
-    void SyncResolution();
-    void SyncInterval();
-    void SyncNumContours();
+    // Synchronizes the contours with the current number of contours and intervals
     void SyncContours();
 
     // save & load
-    bool LoadFile(const QString&);
     bool SaveSettings(const QString&) const;
     bool LoadSettings(const QString&);
 
@@ -82,56 +64,21 @@ private:
 
     bool lock = true;
 
-    // for rendering
+    //################## Members for Rendering 用于渲染的数据成员 ##############################
 
-    // contour values from lowest to highest
-    std::vector<double> m_contourValues;
-
-    // The following share the same index with m_vertices
-    // 以下的索引指向m_vertices
-    std::vector<Vertex*> m_vertices;       // all vertices 所有的顶点
-    std::vector<Face*> m_faces;            // all faces    所有的面
-    std::set<Line> m_charSides;            // a set of characteristic face sides that intersect the contour lines, each line is a pair of two vertices' index in m_vertices
-
-    // The following share the same index with m_charVertices
-    // 以下的索引指向m_charVertices
-    std::vector<Vertex*> m_charVertices;   // vertices on the intersection of contours and faces' lines 特征顶点：在等高线和面的交线上的顶点
-    std::vector< std::set<Line> > m_contours;// a list of contours, each contour is a set of characteristic lines
-
-    // relief properties
-    int m_renderedHeight = 1080;
-    int m_renderedWidth;
-    double m_resolution;
-    double m_interval;
-    int m_numContours = 10;
-    bool m_useGradient = false;
-    ColorScheme* m_colorScheme = nullptr;
-
-    // original file properties
-    double m_maxX;
-    double m_minX;
-    double m_maxY;
-    double m_minY;
-    double m_maxZ;
-    double m_minZ;
-    double m_aspectRatio;     // X / Y; Width / Height
-    double m_originalWidth;   // maxX - minX
-    double m_originalHeight;  // maxY - minY
-    double m_valueRange;      // max - min
-    int m_numVertices;        // number of vertices
-    int m_numFaces;           // number of faces
+    std::vector<double> m_contourVals;                    // contour values from lowest to highest 从低到高的等高线值
+    std::vector<ColorScheme::RGB> m_contourColors;        // colors for each contour line 每个等高线的颜色
+    std::vector< std::set<DirectedLine*> > m_contours;    // contour lines for each contour value 每个等高线值的等高线
 
 
-
-    QString FirstWord(const QString& line) const;
-
-    void AddVertex(Vertex* vertex) { m_vertices.push_back(vertex); }
-    void AddFace(Face* face) { m_faces.push_back(face); }
-
-    Vertex* LinearInterpolate(Vertex*, Vertex*, double);
-    void CalculateIntersectionsOnFace(Face*);
-
-    void RecordCharacteristic(Vertex* v1, Vertex* v2, int);
-
+    //################### Helper Functions 辅助函数 ##########################################
+    Vector* LinearInterpolate(Vertex*, Vertex*, double);
+    void ProcessFace(const Face*);
+    void RecordLine(std::vector<Vector*>, std::vector<int>, double, double, double, int);
     void Clear();
+    void GenerateContourColors();
+
+    std::tuple<int, DirectedLine*, Vector> FindNearestContourLine(double x, double y) const;
+    Vector LineToPointVector(const Vector& p, const Vector& v1, const Vector& v2) const;
+    std::pair<DirectedLine*, Vector> FindNearestLine(double x, double y, int contourIndex) const;
 };

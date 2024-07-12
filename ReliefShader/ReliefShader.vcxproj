@@ -94,10 +94,12 @@
   <ItemGroup>
     <ClCompile Include="ColorBar.cpp" />
     <ClCompile Include="ColorScheme.cpp" />
+    <ClCompile Include="Data.cpp" />
     <ClCompile Include="Face.cpp" />
     <ClCompile Include="PreviewFrame.cpp" />
     <ClCompile Include="Renderer.cpp" />
-    <ClCompile Include="Vertex.cpp" />
+    <ClCompile Include="Settings.cpp" />
+    <ClCompile Include="Vector.cpp" />
     <QtRcc Include="MainWindow.qrc" />
     <QtUic Include="MainWindow.ui" />
     <QtMoc Include="MainWindow.h" />
@@ -107,11 +109,14 @@
   <ItemGroup>
     <QtMoc Include="ColorBar.h" />
     <QtMoc Include="PreviewFrame.h" />
+    <ClInclude Include="Data.h" />
+    <ClInclude Include="Settings.h" />
     <ClInclude Include="Line.h" />
     <ClInclude Include="Renderer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ColorScheme.h" />
+    <ClInclude Include="Vector.h" />
     <ClInclude Include="Vertex.h" />
   </ItemGroup>
   <ItemGroup>
